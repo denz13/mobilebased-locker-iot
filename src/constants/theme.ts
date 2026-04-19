@@ -24,6 +24,14 @@ export const Colors = {
   },
 } as const;
 
+/** Green motif for auth screens (login, splash mark). */
+export const LoginAccent = {
+  main: '#22C55E',
+  soft: '#86EFAC',
+  pale: '#DCFCE7',
+  dark: '#15803D',
+} as const;
+
 export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
 
 export const Fonts = Platform.select({

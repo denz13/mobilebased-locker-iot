@@ -1,0 +1,545 @@
+import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
+import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
+import { useRouter } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import React, { useCallback, useMemo, useState } from 'react';
+import {
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  Platform,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+
+import { Spacing } from '@/constants/theme';
+
+export default function ProfileScreen() {
+  const router = useRouter();
+  const initialProfile = useMemo(
+    () => ({
+      fullName: 'Maria',
+      username: 'maria',
+      email: 'maria@example.com',
+      phone: '+63 9xx xxx xxxx',
+      role: 'Operator',
+      lockerId: 'LOCKER-001',
+      deviceId: 'ESP8266 / NodeMCU',
+      photoUri: '' as string,
+    }),
+    [],
+  );
+
+  const [profile, setProfile] = useState(() => initialProfile);
+
+  const [editOpen, setEditOpen] = useState(false);
+  const [editUsername, setEditUsername] = useState(profile.username);
+  const [editEmail, setEditEmail] = useState(profile.email);
+  const [editPhone, setEditPhone] = useState(profile.phone);
+  const [editPhotoUri, setEditPhotoUri] = useState(profile.photoUri);
+
+  const [pwdOpen, setPwdOpen] = useState(false);
+  const [currentPwd, setCurrentPwd] = useState('');
+  const [newPwd, setNewPwd] = useState('');
+  const [confirmPwd, setConfirmPwd] = useState('');
+  const [pwdVisible, setPwdVisible] = useState(false);
+
+  const openPwd = useCallback(() => {
+    setCurrentPwd('');
+    setNewPwd('');
+    setConfirmPwd('');
+    setPwdVisible(false);
+    setPwdOpen(true);
+  }, []);
+
+  const closePwd = useCallback(() => setPwdOpen(false), []);
+
+  const openEdit = useCallback(() => {
+    setEditUsername(profile.username);
+    setEditEmail(profile.email);
+    setEditPhone(profile.phone);
+    setEditPhotoUri(profile.photoUri);
+    setEditOpen(true);
+  }, [profile]);
+
+  const closeEdit = useCallback(() => setEditOpen(false), []);
+
+  const pickProfilePhoto = useCallback(async () => {
+    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!perm.granted) return;
+
+    const res = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      quality: 0.9,
+      aspect: [1, 1],
+      selectionLimit: 1,
+    });
+
+    if (!res.canceled && res.assets?.[0]?.uri) {
+      setEditPhotoUri(res.assets[0].uri);
+    }
+  }, []);
+
+  const canSaveEdit =
+    editUsername.trim().length >= 3 &&
+    editEmail.trim().includes('@') &&
+    editPhone.trim().length >= 7;
+
+  const saveEdit = useCallback(() => {
+    if (!canSaveEdit) return;
+    setProfile((p) => ({
+      ...p,
+      username: editUsername.trim(),
+      email: editEmail.trim(),
+      phone: editPhone.trim(),
+      photoUri: editPhotoUri.trim(),
+    }));
+    setEditOpen(false);
+  }, [canSaveEdit, editEmail, editPhone, editPhotoUri, editUsername]);
+
+  const canSavePwd =
+    currentPwd.trim().length > 0 &&
+    newPwd.trim().length >= 6 &&
+    confirmPwd.trim().length >= 6 &&
+    newPwd === confirmPwd;
+
+  const savePwd = useCallback(() => {
+    if (!canSavePwd) return;
+    // UI-only: wire to API later
+    setPwdOpen(false);
+  }, [canSavePwd]);
+
+  return (
+    <View style={styles.root}>
+      <StatusBar style="dark" />
+      <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
+        <View style={styles.header}>
+          <Pressable onPress={() => router.back()} style={styles.backBtn} hitSlop={10}>
+            <MaterialCommunityIcons name="chevron-left" size={28} color="#0F172A" />
+          </Pressable>
+          <Text style={styles.headerTitle}>Profile</Text>
+          <View style={styles.headerRightSpacer} />
+        </View>
+
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
+          <View style={styles.card}>
+            <Pressable style={styles.avatar} onPress={openEdit} hitSlop={10}>
+              {profile.photoUri ? (
+                <Image
+                  source={{ uri: profile.photoUri }}
+                  style={styles.avatarImage}
+                  contentFit="cover"
+                  accessibilityLabel="Profile photo"
+                />
+              ) : (
+                <Text style={styles.avatarText}>{profile.fullName.slice(0, 1).toUpperCase()}</Text>
+              )}
+              <View style={styles.avatarEditBadge}>
+                <MaterialCommunityIcons name="pencil" size={14} color="#0F766E" />
+              </View>
+            </Pressable>
+            <Text style={styles.name}>{profile.fullName}</Text>
+            <Text style={styles.sub}>Mobile Based Smart Locker</Text>
+
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Account</Text>
+              <InfoRow icon="account-outline" label="Username" value={profile.username} />
+              <InfoRow icon="email-outline" label="Email" value={profile.email} />
+              <InfoRow icon="phone-outline" label="Phone" value={profile.phone} />
+              <InfoRow icon="shield-check-outline" label="Role" value={profile.role} />
+            </View>
+
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Device</Text>
+              <InfoRow icon="locker" label="Locker ID" value={profile.lockerId} />
+              <InfoRow icon="memory" label="Hardware" value={profile.deviceId} />
+            </View>
+
+            <Pressable style={({ pressed }) => [styles.primaryBtn, pressed && styles.pressed]} onPress={openPwd}>
+              <MaterialCommunityIcons name="key-outline" size={20} color="#FFFFFF" />
+              <Text style={styles.primaryBtnText}>Change Password</Text>
+            </Pressable>
+
+            <Pressable style={({ pressed }) => [styles.secondaryBtn, pressed && styles.pressed]} onPress={openEdit}>
+              <MaterialCommunityIcons name="account-edit-outline" size={20} color="#0F766E" />
+              <Text style={styles.secondaryBtnText}>Edit Profile</Text>
+            </Pressable>
+          </View>
+        </ScrollView>
+
+        <Modal visible={editOpen} transparent animationType="fade" onRequestClose={closeEdit}>
+          <Pressable style={styles.modalBackdrop} onPress={closeEdit}>
+            <Pressable style={styles.modalCard} onPress={() => {}}>
+              <Text style={styles.modalTitle}>Edit Profile</Text>
+
+              <Pressable style={styles.photoPickerRow} onPress={pickProfilePhoto}>
+                <View style={styles.photoCircle}>
+                  {editPhotoUri ? (
+                    <Image source={{ uri: editPhotoUri }} style={styles.photoCircleImage} contentFit="cover" />
+                  ) : (
+                    <MaterialCommunityIcons name="account-circle-outline" size={40} color="#0F766E" />
+                  )}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.photoPickerTitle}>Profile picture</Text>
+                  <Text style={styles.photoPickerSub}>Tap to update</Text>
+                </View>
+                <MaterialCommunityIcons name="chevron-right" size={26} color="#64748B" />
+              </Pressable>
+
+              <Text style={styles.modalLabel}>Username</Text>
+              <TextInput
+                value={editUsername}
+                onChangeText={setEditUsername}
+                placeholder="Username"
+                placeholderTextColor="#94A3B8"
+                autoCapitalize="none"
+                style={styles.modalInput}
+              />
+
+              <Text style={styles.modalLabel}>Email</Text>
+              <TextInput
+                value={editEmail}
+                onChangeText={setEditEmail}
+                placeholder="Email"
+                placeholderTextColor="#94A3B8"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                style={styles.modalInput}
+              />
+
+              <Text style={styles.modalLabel}>Phone</Text>
+              <TextInput
+                value={editPhone}
+                onChangeText={setEditPhone}
+                placeholder="Phone"
+                placeholderTextColor="#94A3B8"
+                keyboardType={Platform.OS === 'ios' ? 'number-pad' : 'phone-pad'}
+                style={styles.modalInput}
+              />
+
+              <View style={styles.modalActions}>
+                <Pressable style={({ pressed }) => [styles.modalBtn, pressed && styles.pressed]} onPress={closeEdit}>
+                  <Text style={styles.modalBtnText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.modalBtnPrimary,
+                    !canSaveEdit && styles.modalBtnPrimaryDisabled,
+                    pressed && canSaveEdit && styles.pressed,
+                  ]}
+                  onPress={saveEdit}
+                  disabled={!canSaveEdit}>
+                  <Text style={styles.modalBtnPrimaryText}>Save</Text>
+                </Pressable>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
+
+        <Modal visible={pwdOpen} transparent animationType="fade" onRequestClose={closePwd}>
+          <Pressable style={styles.modalBackdrop} onPress={closePwd}>
+            <Pressable style={styles.modalCard} onPress={() => {}}>
+              <Text style={styles.modalTitle}>Change Password</Text>
+
+              <Text style={styles.modalLabel}>Current Password</Text>
+              <TextInput
+                value={currentPwd}
+                onChangeText={setCurrentPwd}
+                secureTextEntry={!pwdVisible}
+                placeholder="Enter current password"
+                placeholderTextColor="#94A3B8"
+                style={styles.modalInput}
+              />
+
+              <Text style={styles.modalLabel}>New Password</Text>
+              <TextInput
+                value={newPwd}
+                onChangeText={setNewPwd}
+                secureTextEntry={!pwdVisible}
+                placeholder="Minimum 6 characters"
+                placeholderTextColor="#94A3B8"
+                style={styles.modalInput}
+              />
+
+              <Text style={styles.modalLabel}>Confirm New Password</Text>
+              <TextInput
+                value={confirmPwd}
+                onChangeText={setConfirmPwd}
+                secureTextEntry={!pwdVisible}
+                placeholder="Re-enter new password"
+                placeholderTextColor="#94A3B8"
+                style={styles.modalInput}
+              />
+
+              <Pressable
+                style={({ pressed }) => [styles.toggleRow, pressed && styles.pressed]}
+                onPress={() => setPwdVisible((v) => !v)}>
+                <MaterialCommunityIcons
+                  name={pwdVisible ? 'eye-off-outline' : 'eye-outline'}
+                  size={20}
+                  color="#64748B"
+                />
+                <Text style={styles.toggleText}>{pwdVisible ? 'Hide passwords' : 'Show passwords'}</Text>
+              </Pressable>
+
+              {newPwd.length > 0 && confirmPwd.length > 0 && newPwd !== confirmPwd ? (
+                <Text style={styles.errorText}>Passwords do not match.</Text>
+              ) : null}
+
+              <View style={styles.modalActions}>
+                <Pressable style={({ pressed }) => [styles.modalBtn, pressed && styles.pressed]} onPress={closePwd}>
+                  <Text style={styles.modalBtnText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.modalBtnPrimary,
+                    !canSavePwd && styles.modalBtnPrimaryDisabled,
+                    pressed && canSavePwd && styles.pressed,
+                  ]}
+                  onPress={savePwd}
+                  disabled={!canSavePwd}>
+                  <Text style={styles.modalBtnPrimaryText}>Save</Text>
+                </Pressable>
+              </View>
+            </Pressable>
+          </Pressable>
+        </Modal>
+      </SafeAreaView>
+    </View>
+  );
+}
+
+function InfoRow({
+  icon,
+  label,
+  value,
+}: {
+  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  label: string;
+  value: string;
+}) {
+  return (
+    <View style={styles.infoRow}>
+      <View style={styles.infoIconWrap}>
+        <MaterialCommunityIcons name={icon} size={18} color="#0F766E" />
+      </View>
+      <View style={styles.infoMid}>
+        <Text style={styles.infoLabel}>{label}</Text>
+        <Text style={styles.infoValue}>{value}</Text>
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: '#F1F5F9' },
+  safe: { flex: 1 },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: Spacing.four,
+    paddingTop: Spacing.two,
+    paddingBottom: Spacing.three,
+  },
+  backBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  headerTitle: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  headerRightSpacer: { width: 44 },
+  content: {
+    paddingBottom: Spacing.six,
+  },
+  card: {
+    marginHorizontal: Spacing.four,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    padding: Spacing.four,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  avatar: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: '#CCFBF1',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+    overflow: 'hidden',
+  },
+  avatarImage: { width: '100%', height: '100%' },
+  avatarEditBadge: {
+    position: 'absolute',
+    right: -2,
+    bottom: -2,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  avatarText: { fontSize: 28, fontWeight: '900', color: '#0F766E' },
+  name: { marginTop: Spacing.three, textAlign: 'center', fontSize: 20, fontWeight: '900', color: '#0F172A' },
+  sub: { marginTop: 6, textAlign: 'center', fontSize: 13, fontWeight: '700', color: '#64748B' },
+  section: { marginTop: Spacing.five },
+  sectionTitle: { fontSize: 14, fontWeight: '900', color: '#0F172A', marginBottom: Spacing.three },
+  infoRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
+  infoIconWrap: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    backgroundColor: '#CCFBF1',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  infoMid: { flex: 1 },
+  infoLabel: { fontSize: 12, fontWeight: '800', color: '#64748B' },
+  infoValue: { marginTop: 2, fontSize: 14, fontWeight: '800', color: '#0F172A' },
+  primaryBtn: {
+    marginTop: Spacing.five,
+    backgroundColor: '#0F766E',
+    borderRadius: 999,
+    paddingVertical: 14,
+    paddingHorizontal: Spacing.four,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  primaryBtnText: { color: '#FFFFFF', fontWeight: '900', fontSize: 15 },
+  secondaryBtn: {
+    marginTop: Spacing.three,
+    backgroundColor: '#ECFEFF',
+    borderRadius: 999,
+    paddingVertical: 14,
+    paddingHorizontal: Spacing.four,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    borderWidth: 1,
+    borderColor: '#99F6E4',
+  },
+  secondaryBtnText: { color: '#0F766E', fontWeight: '900', fontSize: 15 },
+  pressed: { opacity: 0.9 },
+
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.5)',
+    paddingHorizontal: Spacing.four,
+    justifyContent: 'center',
+  },
+  modalCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: Spacing.four,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '900',
+    color: '#0F172A',
+    marginBottom: Spacing.three,
+  },
+  modalLabel: {
+    fontSize: 13,
+    fontWeight: '900',
+    color: '#334155',
+    marginTop: Spacing.two,
+    marginBottom: Spacing.two,
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 12,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: '#0F172A',
+    backgroundColor: '#F8FAFC',
+  },
+  photoPickerRow: {
+    marginTop: Spacing.two,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: Spacing.three,
+    paddingHorizontal: Spacing.three,
+    borderRadius: 14,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  photoCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#CCFBF1',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  photoCircleImage: { width: '100%', height: '100%' },
+  photoPickerTitle: { fontSize: 14, fontWeight: '900', color: '#0F172A' },
+  photoPickerSub: { marginTop: 2, fontSize: 12, fontWeight: '700', color: '#64748B' },
+  toggleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: Spacing.three },
+  toggleText: { fontSize: 13, fontWeight: '800', color: '#475569' },
+  errorText: { marginTop: Spacing.two, fontSize: 12, fontWeight: '900', color: '#B91C1C' },
+  modalActions: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+    marginTop: Spacing.four,
+  },
+  modalBtn: {
+    paddingVertical: 12,
+    paddingHorizontal: Spacing.four,
+    borderRadius: 999,
+    backgroundColor: '#E2E8F0',
+  },
+  modalBtnText: {
+    fontWeight: '900',
+    color: '#0F172A',
+  },
+  modalBtnPrimary: {
+    paddingVertical: 12,
+    paddingHorizontal: Spacing.four,
+    borderRadius: 999,
+    backgroundColor: '#0F766E',
+  },
+  modalBtnPrimaryDisabled: {
+    backgroundColor: '#94A3B8',
+  },
+  modalBtnPrimaryText: {
+    fontWeight: '900',
+    color: '#FFFFFF',
+  },
+});
+
