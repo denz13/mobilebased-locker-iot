@@ -4,6 +4,7 @@ import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
+import { onValue, ref as rtdbRef } from 'firebase/database';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
@@ -18,7 +19,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import Animated, { useSharedValue, withSequence, withSpring } from 'react-native-reanimated';
 
 import { Spacing } from '@/constants/theme';
-import { getFirebaseAuth } from '@/lib/firebase';
+import { getFirebaseAuth, getFirebaseRTDB } from '@/lib/firebase';
 
 const Teal = {
   main: '#0D9488',
@@ -29,6 +30,106 @@ const Teal = {
   muted: '#5EEAD4',
   navInactive: '#94A3B8',
 } as const;
+
+const RTDB_ITEMS_PATH = 'items';
+
+type ItemAnalytics = {
+  totalLines: number;
+  totalQty: number;
+  active: number;
+  inactive: number;
+  avgQty: number;
+  last7Days: { shortLabel: string; count: number }[];
+};
+
+function dateKeyLocal(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function buildLast7Template(): ItemAnalytics['last7Days'] {
+  const out: ItemAnalytics['last7Days'] = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - i);
+    out.push({
+      shortLabel: d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' }),
+      count: 0,
+    });
+  }
+  return out;
+}
+
+/** Same validity rules as `rowToLockerItem` in `items.tsx` (name/title, qty, status). */
+function parseRowForStats(row: unknown): {
+  quantity: number;
+  active: boolean;
+  createdAt: number;
+} | null {
+  if (!row || typeof row !== 'object') return null;
+  const r = row as Record<string, unknown>;
+  const name =
+    typeof r.name === 'string'
+      ? r.name
+      : typeof r.title === 'string'
+        ? r.title
+        : '';
+  if (!name.trim()) return null;
+  const quantity =
+    typeof r.quantity === 'number' && Number.isFinite(r.quantity) && r.quantity > 0
+      ? r.quantity
+      : 1;
+  const active = r.status !== 'inactive';
+  const createdAt =
+    typeof r.createdAt === 'number' && Number.isFinite(r.createdAt) ? r.createdAt : 0;
+  return { quantity, active, createdAt };
+}
+
+function computeItemAnalytics(val: Record<string, unknown> | null): ItemAnalytics {
+  if (!val) {
+    return {
+      totalLines: 0,
+      totalQty: 0,
+      active: 0,
+      inactive: 0,
+      avgQty: 0,
+      last7Days: buildLast7Template(),
+    };
+  }
+  const rows: NonNullable<ReturnType<typeof parseRowForStats>>[] = [];
+  for (const row of Object.values(val)) {
+    const p = parseRowForStats(row);
+    if (p) rows.push(p);
+  }
+  let totalQty = 0;
+  let active = 0;
+  let inactive = 0;
+  const perDay: Record<string, number> = {};
+  for (const p of rows) {
+    totalQty += p.quantity;
+    if (p.active) active++;
+    else inactive++;
+    if (p.createdAt > 0) {
+      const d = new Date(p.createdAt);
+      const key = dateKeyLocal(d);
+      perDay[key] = (perDay[key] ?? 0) + 1;
+    }
+  }
+  const totalLines = rows.length;
+  const avgQty = totalLines > 0 ? Math.round((totalQty / totalLines) * 10) / 10 : 0;
+  const last7Days: ItemAnalytics['last7Days'] = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - i);
+    const key = dateKeyLocal(d);
+    last7Days.push({
+      shortLabel: d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric' }),
+      count: perDay[key] ?? 0,
+    });
+  }
+  return { totalLines, totalQty, active, inactive, avgQty, last7Days };
+}
 
 const GROUPS = [
   {
@@ -205,6 +306,98 @@ function ActionPill({
   );
 }
 
+/** Inner drawable height inside the track (track clips overflow). */
+const ANALYTICS_BAR_TRACK_H = 88;
+const ANALYTICS_BAR_INNER_MAX = ANALYTICS_BAR_TRACK_H - 6;
+
+function ItemsAnalyticsBlock({
+  data,
+  loading,
+  hasError,
+  onOpenItems,
+}: {
+  data: ItemAnalytics | null;
+  loading: boolean;
+  hasError: boolean;
+  onOpenItems: () => void;
+}) {
+  const a = data ?? computeItemAnalytics(null);
+  const maxC = Math.max(1, ...a.last7Days.map((x) => x.count));
+
+  return (
+    <View style={styles.analyticsCard}>
+      <View style={styles.analyticsHeaderRow}>
+        <Text style={styles.analyticsTitle}>Items analytics</Text>
+        <Pressable onPress={onOpenItems} hitSlop={8}>
+          <Text style={styles.sectionLink}>View all</Text>
+        </Pressable>
+      </View>
+      {hasError ? (
+        <Text style={styles.analyticsErr}>
+          Could not load live counts. Check your connection and Firebase rules.
+        </Text>
+      ) : null}
+
+      {loading ? (
+        <View style={styles.analyticsLoading}>
+          <ActivityIndicator color={Teal.main} />
+          <Text style={styles.analyticsLoadingText}>Loading…</Text>
+        </View>
+      ) : (
+        <>
+          <View style={styles.analyticsGrid}>
+            <View style={styles.analyticsCell}>
+              <Text style={styles.analyticsCellLabel}>Stored lines</Text>
+              <Text style={styles.analyticsCellValue}>{a.totalLines}</Text>
+            </View>
+            <View style={styles.analyticsCell}>
+              <Text style={styles.analyticsCellLabel}>Total quantity</Text>
+              <Text style={styles.analyticsCellValue}>{a.totalQty}</Text>
+            </View>
+            <View style={styles.analyticsCell}>
+              <Text style={styles.analyticsCellLabel}>Active</Text>
+              <Text style={[styles.analyticsCellValue, { color: '#15803D' }]}>{a.active}</Text>
+            </View>
+            <View style={styles.analyticsCell}>
+              <Text style={styles.analyticsCellLabel}>Inactive</Text>
+              <Text style={[styles.analyticsCellValue, { color: '#64748B' }]}>{a.inactive}</Text>
+            </View>
+          </View>
+          <Text style={styles.analyticsAvg}>
+            Avg quantity per line: <Text style={styles.analyticsAvgNum}>{a.avgQty}</Text>
+          </Text>
+
+          <Text style={styles.analyticsChartCaption}>New items per day (last 7 days)</Text>
+          <View style={styles.analyticsChartOuter}>
+            <View style={styles.analyticsChartRow}>
+              {a.last7Days.map((d, i) => {
+                const rawH =
+                  d.count === 0
+                    ? 2
+                    : Math.max(4, (d.count / maxC) * ANALYTICS_BAR_INNER_MAX);
+                const barH = Math.min(ANALYTICS_BAR_INNER_MAX, rawH);
+                return (
+                  <View key={i} style={styles.analyticsBarCol}>
+                    <View style={[styles.analyticsBarTrack, { height: ANALYTICS_BAR_TRACK_H }]}>
+                      <View style={[styles.analyticsBarFill, { height: barH }]} />
+                    </View>
+                    <Text style={styles.analyticsBarCount} numberOfLines={1}>
+                      {d.count}
+                    </Text>
+                    <Text style={styles.analyticsBarDay} numberOfLines={2}>
+                      {d.shortLabel}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+        </>
+      )}
+    </View>
+  );
+}
+
 export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -212,12 +405,38 @@ export default function DashboardScreen() {
   const [pictureIndex, setPictureIndex] = useState(0);
   const [picturesW, setPicturesW] = useState(0);
   const [loggingOut, setLoggingOut] = useState(false);
+  const [itemAnalytics, setItemAnalytics] = useState<ItemAnalytics | null>(null);
+  const [itemsAnalyticsError, setItemsAnalyticsError] = useState(false);
   const tabBarPad = Math.max(insets.bottom, 10);
   const tabBarH = 60 + tabBarPad;
   const bellScale = useSharedValue(1);
 
   useEffect(() => {
     return onAuthStateChanged(getFirebaseAuth(), setUser);
+  }, []);
+
+  useEffect(() => {
+    let db;
+    try {
+      db = getFirebaseRTDB();
+    } catch {
+      setItemsAnalyticsError(true);
+      setItemAnalytics(computeItemAnalytics(null));
+      return;
+    }
+    const itemsRef = rtdbRef(db, RTDB_ITEMS_PATH);
+    const unsub = onValue(
+      itemsRef,
+      (snap) => {
+        setItemsAnalyticsError(false);
+        setItemAnalytics(computeItemAnalytics(snap.val() as Record<string, unknown> | null));
+      },
+      () => {
+        setItemsAnalyticsError(true);
+        setItemAnalytics(computeItemAnalytics(null));
+      },
+    );
+    return () => unsub();
   }, []);
 
   const greetName = useMemo(() => greetNameFromUser(user), [user]);
@@ -281,6 +500,13 @@ export default function DashboardScreen() {
           </View>
 
           <AnalogClockCard />
+
+          <ItemsAnalyticsBlock
+            data={itemAnalytics}
+            loading={itemAnalytics === null}
+            hasError={itemsAnalyticsError}
+            onOpenItems={() => router.push('/items')}
+          />
 
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Pictures</Text>
@@ -581,6 +807,134 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '800',
     letterSpacing: 0.6,
+  },
+  analyticsCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    padding: Spacing.four,
+    marginBottom: Spacing.five,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 8,
+    elevation: 3,
+  },
+  analyticsHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.three,
+  },
+  analyticsTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  analyticsErr: {
+    fontSize: 13,
+    color: '#B45309',
+    fontWeight: '500',
+    marginBottom: Spacing.two,
+  },
+  analyticsLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: Spacing.three,
+  },
+  analyticsLoadingText: {
+    fontSize: 14,
+    color: '#64748B',
+    fontWeight: '500',
+  },
+  analyticsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  analyticsCell: {
+    width: '48%',
+    flexGrow: 1,
+    minWidth: '46%',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    paddingVertical: Spacing.three,
+    paddingHorizontal: Spacing.three,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: '#E2E8F0',
+  },
+  analyticsCellLabel: {
+    fontSize: 12,
+    color: '#64748B',
+    fontWeight: '600',
+  },
+  analyticsCellValue: {
+    marginTop: 6,
+    fontSize: 22,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  analyticsAvg: {
+    marginTop: Spacing.three,
+    fontSize: 13,
+    color: '#475569',
+    fontWeight: '500',
+  },
+  analyticsAvgNum: {
+    fontWeight: '800',
+    color: Teal.main,
+  },
+  analyticsChartCaption: {
+    marginTop: Spacing.four,
+    marginBottom: Spacing.two,
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#334155',
+  },
+  analyticsChartOuter: {
+    width: '100%',
+    overflow: 'hidden',
+  },
+  analyticsChartRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    width: '100%',
+    overflow: 'hidden',
+    gap: 4,
+  },
+  analyticsBarCol: {
+    flex: 1,
+    flexBasis: 0,
+    minWidth: 0,
+    maxWidth: '100%',
+    alignItems: 'center',
+  },
+  analyticsBarTrack: {
+    width: '100%',
+    maxWidth: 48,
+    alignSelf: 'center',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    overflow: 'hidden',
+  },
+  analyticsBarFill: {
+    width: '78%',
+    maxWidth: 40,
+    backgroundColor: Teal.main,
+    borderRadius: 4,
+  },
+  analyticsBarCount: {
+    marginTop: 4,
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#0F172A',
+  },
+  analyticsBarDay: {
+    marginTop: 2,
+    fontSize: 9,
+    fontWeight: '600',
+    color: '#64748B',
+    textAlign: 'center',
   },
   actionsRow: {
     flexDirection: 'row',
