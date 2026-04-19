@@ -66,7 +66,7 @@ function assertConfig(config: FirebaseOptions) {
     throw new Error(
       `Missing Firebase config (${missing.join(
         ', ',
-      )}). Open the project root ".env" file and set every EXPO_PUBLIC_FIREBASE_* value to the non-empty strings from Firebase Console → Project settings → Your apps → Web app. Save the file, then stop Metro and run "npx expo start -c".`,
+      )}). Local: copy .env.example to .env, set EXPO_PUBLIC_FIREBASE_* from Firebase Console → Project settings → Your apps (Web), then npx expo start -c. EAS/APK: .env is not sent to the cloud — add the same EXPO_PUBLIC_* keys in expo.dev → Project → Environment variables (for this build profile), then rebuild.`,
     );
   }
 }

@@ -3,9 +3,10 @@ import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { onAuthStateChanged, signInWithEmailAndPassword } from 'firebase/auth';
 import { push, ref } from 'firebase/database';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  BackHandler,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -13,6 +14,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  ToastAndroid,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -74,10 +76,15 @@ export default function LoginScreen() {
   const [submitAttempted, setSubmitAttempted] = useState(false);
   /** After Firebase restores session, skip this screen if already signed in. */
   const [sessionChecked, setSessionChecked] = useState(false);
+  const authListenerMounted = useRef(true);
+  const lastAndroidBack = useRef(0);
 
   useEffect(() => {
+    authListenerMounted.current = true;
+    let unsub: (() => void) | undefined;
     try {
-      return onAuthStateChanged(getFirebaseAuth(), (u) => {
+      unsub = onAuthStateChanged(getFirebaseAuth(), (u) => {
+        if (!authListenerMounted.current) return;
         if (u) {
           router.replace('/dashboard');
         } else {
@@ -86,9 +93,28 @@ export default function LoginScreen() {
       });
     } catch {
       setSessionChecked(true);
-      return () => {};
     }
+    return () => {
+      authListenerMounted.current = false;
+      unsub?.();
+    };
   }, [router]);
+
+  /** Avoid instant app close on Android when login is the only screen (double back to exit). */
+  useEffect(() => {
+    if (Platform.OS !== 'android') return undefined;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      const now = Date.now();
+      if (now - lastAndroidBack.current < 2500) {
+        BackHandler.exitApp();
+        return true;
+      }
+      lastAndroidBack.current = now;
+      ToastAndroid.show('Press back again to exit', ToastAndroid.SHORT);
+      return true;
+    });
+    return () => sub.remove();
+  }, []);
 
   const emailTrimmed = email.trim();
 
@@ -133,8 +159,19 @@ export default function LoginScreen() {
       setPasswordWatch(true);
       return;
     }
+    let auth;
+    try {
+      auth = getFirebaseAuth();
+    } catch (e: unknown) {
+      const msg =
+        e instanceof Error
+          ? e.message
+          : 'Could not start sign-in. Check Firebase configuration (EXPO_PUBLIC_* in EAS env or .env).';
+      setAuthError(msg);
+      return;
+    }
     setLoading(true);
-    signInWithEmailAndPassword(getFirebaseAuth(), emailTrimmed, password)
+    signInWithEmailAndPassword(auth, emailTrimmed, password)
       .then(async (cred) => {
         try {
           const db = getFirebaseRTDB();

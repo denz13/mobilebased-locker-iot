@@ -1,7 +1,8 @@
 const path = require('path');
 const { loadProjectEnv } = require('@expo/env');
 
-// Ensure `.env` is applied before reading EXPO_PUBLIC_* for `extra` (Expo also loads this, but order can vary).
+// Local: values come from `.env` (gitignored). EAS Build: set the same `EXPO_PUBLIC_FIREBASE_*`
+// variables in expo.dev → Project → Environment variables, or `eas env:create` — otherwise the APK has no Firebase config.
 loadProjectEnv(path.resolve(__dirname), { silent: true });
 
 const appJson = require('./app.json');
@@ -11,6 +12,10 @@ module.exports = {
     ...appJson.expo,
     extra: {
       ...(appJson.expo.extra ?? {}),
+      eas: {
+        ...(appJson.expo.extra?.eas ?? {}),
+        projectId: '6d48d4e9-0a96-4687-b734-a2ed2906502e',
+      },
       firebase: {
         apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY,
         authDomain: process.env.EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN,
