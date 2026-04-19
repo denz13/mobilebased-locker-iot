@@ -1,23 +1,49 @@
 import { useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useEffect } from "react";
+import { onAuthStateChanged, type User } from "firebase/auth";
+import { useEffect, useState } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { LoginLogoMark } from "@/components/login-logo-mark";
 import { LoginAccent, Spacing } from "@/constants/theme";
+import { getFirebaseAuth } from "@/lib/firebase";
 
 const SPLASH_MS = 5000;
 
 export default function SplashScreen() {
   const router = useRouter();
+  const [user, setUser] = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [splashDone, setSplashDone] = useState(false);
 
   useEffect(() => {
-    const t = setTimeout(() => {
-      router.replace("/login");
-    }, SPLASH_MS);
+    try {
+      return onAuthStateChanged(getFirebaseAuth(), (u) => {
+        setUser(u);
+        setAuthReady(true);
+      });
+    } catch {
+      setAuthReady(true);
+      return () => {};
+    }
+  }, []);
+
+  useEffect(() => {
+    const t = setTimeout(() => setSplashDone(true), SPLASH_MS);
     return () => clearTimeout(t);
-  }, [router]);
+  }, []);
+
+  useEffect(() => {
+    if (!authReady) return;
+    if (user) {
+      router.replace("/dashboard");
+      return;
+    }
+    if (splashDone) {
+      router.replace("/login");
+    }
+  }, [authReady, splashDone, user, router]);
 
   return (
     <View style={styles.root}>

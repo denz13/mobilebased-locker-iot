@@ -3,8 +3,21 @@ import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import React, { useCallback, useMemo, useState } from 'react';
 import {
+  EmailAuthProvider,
+  onAuthStateChanged,
+  reload,
+  reauthenticateWithCredential,
+  updateEmail,
+  updatePassword,
+  updateProfile,
+  type User,
+} from 'firebase/auth';
+import { onValue, ref, update } from 'firebase/database';
+import { getDownloadURL, ref as storageRef, uploadBytes } from 'firebase/storage';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
   Modal,
   Pressable,
   ScrollView,
@@ -17,54 +30,148 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { Spacing } from '@/constants/theme';
+import { getFirebaseAuth, getFirebaseRTDB, getFirebaseStorage } from '@/lib/firebase';
+
+function authErr(e: unknown): string {
+  const code =
+    e &&
+    typeof e === 'object' &&
+    'code' in e &&
+    typeof (e as { code: unknown }).code === 'string'
+      ? (e as { code: string }).code
+      : '';
+  switch (code) {
+    case 'auth/wrong-password':
+    case 'auth/invalid-credential':
+      return 'Current password is incorrect.';
+    case 'auth/requires-recent-login':
+      return 'Please sign out and sign in again, then retry.';
+    case 'auth/email-already-in-use':
+      return 'That email is already used by another account.';
+    case 'auth/invalid-email':
+      return 'Enter a valid email address.';
+    case 'auth/weak-password':
+      return 'Password is too weak. Use at least 6 characters.';
+    default:
+      if (e instanceof Error) return e.message;
+      return 'Something went wrong. Try again.';
+  }
+}
+
+type ProfileView = {
+  fullName: string;
+  username: string;
+  email: string;
+  phone: string;
+  role: string;
+  lockerId: string;
+  deviceId: string;
+  photoUri: string;
+};
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const initialProfile = useMemo(
-    () => ({
-      fullName: 'Maria',
-      username: 'maria',
-      email: 'maria@example.com',
-      phone: '+63 9xx xxx xxxx',
-      role: 'Operator',
-      lockerId: 'LOCKER-001',
-      deviceId: 'ESP8266 / NodeMCU',
-      photoUri: '' as string,
-    }),
-    [],
-  );
+  const [authReady, setAuthReady] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+  const [phone, setPhone] = useState('');
 
-  const [profile, setProfile] = useState(() => initialProfile);
+  const [profile, setProfile] = useState<ProfileView>(() => ({
+    fullName: '…',
+    username: '…',
+    email: '',
+    phone: '',
+    role: 'Operator',
+    lockerId: 'LOCKER-001',
+    deviceId: 'ESP8266 / NodeMCU',
+    photoUri: '',
+  }));
 
   const [editOpen, setEditOpen] = useState(false);
-  const [editUsername, setEditUsername] = useState(profile.username);
-  const [editEmail, setEditEmail] = useState(profile.email);
-  const [editPhone, setEditPhone] = useState(profile.phone);
-  const [editPhotoUri, setEditPhotoUri] = useState(profile.photoUri);
+  const [editUsername, setEditUsername] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editPhotoUri, setEditPhotoUri] = useState('');
+  const [reauthPwd, setReauthPwd] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   const [pwdOpen, setPwdOpen] = useState(false);
   const [currentPwd, setCurrentPwd] = useState('');
   const [newPwd, setNewPwd] = useState('');
   const [confirmPwd, setConfirmPwd] = useState('');
   const [pwdVisible, setPwdVisible] = useState(false);
+  const [savingPwd, setSavingPwd] = useState(false);
+  const [pwdError, setPwdError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(getFirebaseAuth(), (u) => {
+      setUser(u);
+      setAuthReady(true);
+      if (!u) {
+        router.replace('/login');
+      }
+    });
+    return () => unsub();
+  }, [router]);
+
+  useEffect(() => {
+    if (!user) return;
+    let db;
+    try {
+      db = getFirebaseRTDB();
+    } catch {
+      return;
+    }
+    const r = ref(db, `userProfiles/${user.uid}/phone`);
+    const unsub = onValue(r, (snap) => {
+      const v = snap.val();
+      setPhone(typeof v === 'string' ? v : '');
+    });
+    return () => unsub();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const dn = user.displayName || user.email?.split('@')[0] || 'User';
+    setProfile({
+      fullName: dn,
+      username: dn,
+      email: user.email || '',
+      phone,
+      role: 'Operator',
+      lockerId: 'LOCKER-001',
+      deviceId: 'ESP8266 / NodeMCU',
+      photoUri: user.photoURL || '',
+    });
+  }, [user, phone]);
+
+  const emailChanged = useMemo(() => {
+    if (!user?.email) return false;
+    return editEmail.trim().toLowerCase() !== user.email.toLowerCase();
+  }, [editEmail, user]);
 
   const openPwd = useCallback(() => {
     setCurrentPwd('');
     setNewPwd('');
     setConfirmPwd('');
     setPwdVisible(false);
+    setPwdError(null);
     setPwdOpen(true);
   }, []);
 
   const closePwd = useCallback(() => setPwdOpen(false), []);
 
   const openEdit = useCallback(() => {
-    setEditUsername(profile.username);
-    setEditEmail(profile.email);
-    setEditPhone(profile.phone);
-    setEditPhotoUri(profile.photoUri);
+    if (!user) return;
+    const dn = user.displayName || user.email?.split('@')[0] || '';
+    setEditUsername(dn);
+    setEditEmail(user.email || '');
+    setEditPhone(phone);
+    setEditPhotoUri(user.photoURL || '');
+    setReauthPwd('');
+    setEditError(null);
     setEditOpen(true);
-  }, [profile]);
+  }, [phone, user]);
 
   const closeEdit = useCallback(() => setEditOpen(false), []);
 
@@ -75,7 +182,7 @@ export default function ProfileScreen() {
     const res = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
-      quality: 0.9,
+      quality: 0.85,
       aspect: [1, 1],
       selectionLimit: 1,
     });
@@ -86,21 +193,68 @@ export default function ProfileScreen() {
   }, []);
 
   const canSaveEdit =
-    editUsername.trim().length >= 3 &&
+    editUsername.trim().length >= 2 &&
     editEmail.trim().includes('@') &&
-    editPhone.trim().length >= 7;
+    editPhone.trim().length >= 7 &&
+    (!emailChanged || reauthPwd.length > 0);
 
-  const saveEdit = useCallback(() => {
-    if (!canSaveEdit) return;
-    setProfile((p) => ({
-      ...p,
-      username: editUsername.trim(),
-      email: editEmail.trim(),
-      phone: editPhone.trim(),
-      photoUri: editPhotoUri.trim(),
-    }));
-    setEditOpen(false);
-  }, [canSaveEdit, editEmail, editPhone, editPhotoUri, editUsername]);
+  const saveEdit = useCallback(async () => {
+    if (!canSaveEdit || !user || savingEdit) return;
+    setSavingEdit(true);
+    setEditError(null);
+    try {
+      const auth = getFirebaseAuth();
+      const u = auth.currentUser;
+      if (!u) throw new Error('Not signed in');
+
+      let photoURL: string | undefined = u.photoURL || undefined;
+      if (editPhotoUri && !/^https?:\/\//i.test(editPhotoUri)) {
+        const res = await fetch(editPhotoUri);
+        const blob = await res.blob();
+        const storage = getFirebaseStorage();
+        const path = storageRef(storage, `avatars/${u.uid}/profile.jpg`);
+        await uploadBytes(path, blob, { contentType: blob.type || 'image/jpeg' });
+        photoURL = await getDownloadURL(path);
+      } else if (editPhotoUri && /^https?:\/\//i.test(editPhotoUri)) {
+        photoURL = editPhotoUri;
+      }
+
+      await updateProfile(u, {
+        displayName: editUsername.trim(),
+        photoURL: photoURL || undefined,
+      });
+
+      if (emailChanged && u.email) {
+        const cred = EmailAuthProvider.credential(u.email, reauthPwd);
+        await reauthenticateWithCredential(u, cred);
+        await updateEmail(u, editEmail.trim());
+        await reload(u);
+      }
+
+      const db = getFirebaseRTDB();
+      await update(ref(db, `userProfiles/${u.uid}`), {
+        phone: editPhone.trim(),
+        updatedAt: Date.now(),
+      });
+
+      setEditOpen(false);
+      setReauthPwd('');
+    } catch (e) {
+      setEditError(authErr(e));
+    } finally {
+      setSavingEdit(false);
+    }
+  }, [
+    canSaveEdit,
+    editEmail,
+    editPhone,
+    editPhotoUri,
+    editUsername,
+    emailChanged,
+    reauthPwd,
+    savingEdit,
+    user,
+  ]);
 
   const canSavePwd =
     currentPwd.trim().length > 0 &&
@@ -108,11 +262,39 @@ export default function ProfileScreen() {
     confirmPwd.trim().length >= 6 &&
     newPwd === confirmPwd;
 
-  const savePwd = useCallback(() => {
-    if (!canSavePwd) return;
-    // UI-only: wire to API later
-    setPwdOpen(false);
-  }, [canSavePwd]);
+  const savePwd = useCallback(async () => {
+    if (!canSavePwd || savingPwd) return;
+    const auth = getFirebaseAuth();
+    const u = auth.currentUser;
+    if (!u?.email) return;
+
+    setSavingPwd(true);
+    setPwdError(null);
+    try {
+      const cred = EmailAuthProvider.credential(u.email, currentPwd.trim());
+      await reauthenticateWithCredential(u, cred);
+      await updatePassword(u, newPwd.trim());
+      setPwdOpen(false);
+      setCurrentPwd('');
+      setNewPwd('');
+      setConfirmPwd('');
+    } catch (e) {
+      setPwdError(authErr(e));
+    } finally {
+      setSavingPwd(false);
+    }
+  }, [canSavePwd, currentPwd, newPwd, savingPwd]);
+
+  if (!authReady || !user) {
+    return (
+      <View style={styles.root}>
+        <StatusBar style="dark" />
+        <SafeAreaView style={[styles.safe, styles.centered]} edges={['top', 'bottom']}>
+          <ActivityIndicator size="large" color="#0F766E" />
+        </SafeAreaView>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.root}>
@@ -148,9 +330,9 @@ export default function ProfileScreen() {
 
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Account</Text>
-              <InfoRow icon="account-outline" label="Username" value={profile.username} />
-              <InfoRow icon="email-outline" label="Email" value={profile.email} />
-              <InfoRow icon="phone-outline" label="Phone" value={profile.phone} />
+              <InfoRow icon="account-outline" label="Display name" value={profile.username} />
+              <InfoRow icon="email-outline" label="Email" value={profile.email || '—'} />
+              <InfoRow icon="phone-outline" label="Phone" value={profile.phone || '—'} />
               <InfoRow icon="shield-check-outline" label="Role" value={profile.role} />
             </View>
 
@@ -187,18 +369,18 @@ export default function ProfileScreen() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.photoPickerTitle}>Profile picture</Text>
-                  <Text style={styles.photoPickerSub}>Tap to update</Text>
+                  <Text style={styles.photoPickerSub}>Tap to update (uploads to Firebase Storage)</Text>
                 </View>
                 <MaterialCommunityIcons name="chevron-right" size={26} color="#64748B" />
               </Pressable>
 
-              <Text style={styles.modalLabel}>Username</Text>
+              <Text style={styles.modalLabel}>Display name</Text>
               <TextInput
                 value={editUsername}
                 onChangeText={setEditUsername}
-                placeholder="Username"
+                placeholder="Your name"
                 placeholderTextColor="#94A3B8"
-                autoCapitalize="none"
+                autoCapitalize="words"
                 style={styles.modalInput}
               />
 
@@ -213,6 +395,23 @@ export default function ProfileScreen() {
                 style={styles.modalInput}
               />
 
+              {emailChanged ? (
+                <>
+                  <Text style={styles.modalHint}>
+                    Changing email requires your current account password to verify it’s you.
+                  </Text>
+                  <Text style={styles.modalLabel}>Current password</Text>
+                  <TextInput
+                    value={reauthPwd}
+                    onChangeText={setReauthPwd}
+                    secureTextEntry
+                    placeholder="Password for current email"
+                    placeholderTextColor="#94A3B8"
+                    style={styles.modalInput}
+                  />
+                </>
+              ) : null}
+
               <Text style={styles.modalLabel}>Phone</Text>
               <TextInput
                 value={editPhone}
@@ -223,8 +422,13 @@ export default function ProfileScreen() {
                 style={styles.modalInput}
               />
 
+              {editError ? <Text style={styles.errorText}>{editError}</Text> : null}
+
               <View style={styles.modalActions}>
-                <Pressable style={({ pressed }) => [styles.modalBtn, pressed && styles.pressed]} onPress={closeEdit}>
+                <Pressable
+                  style={({ pressed }) => [styles.modalBtn, pressed && styles.pressed]}
+                  onPress={closeEdit}
+                  disabled={savingEdit}>
                   <Text style={styles.modalBtnText}>Cancel</Text>
                 </Pressable>
                 <Pressable
@@ -233,9 +437,13 @@ export default function ProfileScreen() {
                     !canSaveEdit && styles.modalBtnPrimaryDisabled,
                     pressed && canSaveEdit && styles.pressed,
                   ]}
-                  onPress={saveEdit}
-                  disabled={!canSaveEdit}>
-                  <Text style={styles.modalBtnPrimaryText}>Save</Text>
+                  onPress={() => void saveEdit()}
+                  disabled={!canSaveEdit || savingEdit}>
+                  {savingEdit ? (
+                    <ActivityIndicator color="#FFFFFF" size="small" />
+                  ) : (
+                    <Text style={styles.modalBtnPrimaryText}>Save</Text>
+                  )}
                 </Pressable>
               </View>
             </Pressable>
@@ -292,8 +500,13 @@ export default function ProfileScreen() {
                 <Text style={styles.errorText}>Passwords do not match.</Text>
               ) : null}
 
+              {pwdError ? <Text style={styles.errorText}>{pwdError}</Text> : null}
+
               <View style={styles.modalActions}>
-                <Pressable style={({ pressed }) => [styles.modalBtn, pressed && styles.pressed]} onPress={closePwd}>
+                <Pressable
+                  style={({ pressed }) => [styles.modalBtn, pressed && styles.pressed]}
+                  onPress={closePwd}
+                  disabled={savingPwd}>
                   <Text style={styles.modalBtnText}>Cancel</Text>
                 </Pressable>
                 <Pressable
@@ -302,9 +515,13 @@ export default function ProfileScreen() {
                     !canSavePwd && styles.modalBtnPrimaryDisabled,
                     pressed && canSavePwd && styles.pressed,
                   ]}
-                  onPress={savePwd}
-                  disabled={!canSavePwd}>
-                  <Text style={styles.modalBtnPrimaryText}>Save</Text>
+                  onPress={() => void savePwd()}
+                  disabled={!canSavePwd || savingPwd}>
+                  {savingPwd ? (
+                    <ActivityIndicator color="#FFFFFF" size="small" />
+                  ) : (
+                    <Text style={styles.modalBtnPrimaryText}>Save</Text>
+                  )}
                 </Pressable>
               </View>
             </Pressable>
@@ -340,6 +557,7 @@ function InfoRow({
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#F1F5F9' },
   safe: { flex: 1 },
+  centered: { justifyContent: 'center', alignItems: 'center' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -475,6 +693,13 @@ const styles = StyleSheet.create({
     marginTop: Spacing.two,
     marginBottom: Spacing.two,
   },
+  modalHint: {
+    marginTop: Spacing.two,
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#64748B',
+    lineHeight: 17,
+  },
   modalInput: {
     borderWidth: 1,
     borderColor: '#E2E8F0',
@@ -529,6 +754,9 @@ const styles = StyleSheet.create({
     color: '#0F172A',
   },
   modalBtnPrimary: {
+    minWidth: 88,
+    alignItems: 'center',
+    justifyContent: 'center',
     paddingVertical: 12,
     paddingHorizontal: Spacing.four,
     borderRadius: 999,
@@ -542,4 +770,3 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
 });
-

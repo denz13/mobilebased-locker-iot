@@ -3,8 +3,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useMemo, useState } from 'react';
+import { onAuthStateChanged, signOut, type User } from 'firebase/auth';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,6 +18,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import Animated, { useSharedValue, withSequence, withSpring } from 'react-native-reanimated';
 
 import { Spacing } from '@/constants/theme';
+import { getFirebaseAuth } from '@/lib/firebase';
 
 const Teal = {
   main: '#0D9488',
@@ -88,6 +92,23 @@ const PICTURES = [
   { id: '2', label: 'Smart', source: require('@/assets/images/logo.png') },
   { id: '3', label: 'IoT', source: require('@/assets/images/logo.png') },
 ] as const;
+
+function greetNameFromUser(u: User | null): string {
+  if (!u) return 'User';
+  const dn = u.displayName?.trim();
+  if (dn) return dn;
+  const email = u.email?.trim();
+  if (email?.includes('@')) {
+    return email.split('@')[0] || 'User';
+  }
+  return 'User';
+}
+
+function firstLetter(name: string): string {
+  const t = name.trim();
+  if (!t) return '?';
+  return t.slice(0, 1).toUpperCase();
+}
 
 function formatDate(d: Date) {
   return d.toLocaleDateString(undefined, {
@@ -187,11 +208,46 @@ function ActionPill({
 export default function DashboardScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const [user, setUser] = useState<User | null>(null);
   const [pictureIndex, setPictureIndex] = useState(0);
   const [picturesW, setPicturesW] = useState(0);
+  const [loggingOut, setLoggingOut] = useState(false);
   const tabBarPad = Math.max(insets.bottom, 10);
   const tabBarH = 60 + tabBarPad;
   const bellScale = useSharedValue(1);
+
+  useEffect(() => {
+    return onAuthStateChanged(getFirebaseAuth(), setUser);
+  }, []);
+
+  const greetName = useMemo(() => greetNameFromUser(user), [user]);
+  const avatarLetter = useMemo(() => firstLetter(greetName), [greetName]);
+
+  const performLogout = useCallback(async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await signOut(getFirebaseAuth());
+      router.replace('/login');
+    } catch {
+      setLoggingOut(false);
+    }
+  }, [loggingOut, router]);
+
+  const confirmLogout = useCallback(() => {
+    Alert.alert(
+      'Log out?',
+      'You will need to sign in again to access your locker dashboard and synced data.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Log out',
+          style: 'destructive',
+          onPress: () => void performLogout(),
+        },
+      ],
+    );
+  }, [performLogout]);
 
   return (
     <View style={styles.root}>
@@ -204,10 +260,10 @@ export default function DashboardScreen() {
             { paddingBottom: tabBarH + Spacing.five },
           ]}>
           <View style={styles.header}>
-            <AvatarBubble label="M" />
+            <AvatarBubble label={avatarLetter} />
             <View style={styles.headerText}>
               <Text style={styles.hello}>
-                Hello, <Text style={styles.helloName}>Maria</Text>
+                Hello, <Text style={styles.helloName}>{greetName}</Text>
               </Text>
             </View>
             <Pressable
@@ -334,6 +390,24 @@ export default function DashboardScreen() {
           inactiveColor={Teal.navInactive}
         />
       </View>
+
+      <Pressable
+        style={({ pressed }) => [
+          styles.logoutFab,
+          { bottom: tabBarH + 12 },
+          pressed && styles.logoutFabPressed,
+          loggingOut && styles.logoutFabDisabled,
+        ]}
+        onPress={confirmLogout}
+        disabled={loggingOut}
+        accessibilityRole="button"
+        accessibilityLabel="Log out">
+        {loggingOut ? (
+          <ActivityIndicator color="#FFFFFF" size="small" />
+        ) : (
+          <MaterialCommunityIcons name="logout" size={24} color="#FFFFFF" />
+        )}
+      </Pressable>
     </View>
   );
 }
@@ -671,5 +745,27 @@ const styles = StyleSheet.create({
   tabLabelActive: {
     color: Teal.main,
     fontWeight: '700',
+  },
+  logoutFab: {
+    position: 'absolute',
+    right: Spacing.four,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: Teal.dark,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 10,
+  },
+  logoutFabPressed: {
+    opacity: 0.92,
+  },
+  logoutFabDisabled: {
+    opacity: 0.75,
   },
 });
