@@ -1,16 +1,18 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { push, ref, onValue, update } from 'firebase/database';
+import { push, ref, onValue, remove, update } from 'firebase/database';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
   TextInput,
+  ToastAndroid,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -32,6 +34,14 @@ type LockerItem = {
 };
 
 const DEFAULT_ICON: keyof typeof MaterialCommunityIcons.glyphMap = 'cube-outline';
+
+function showToast(message: string) {
+  if (Platform.OS === 'android') {
+    ToastAndroid.show(message, ToastAndroid.SHORT);
+    return;
+  }
+  Alert.alert('Info', message);
+}
 
 function formatDateTime(ts: number): string {
   if (!ts) return '—';
@@ -90,8 +100,6 @@ function rowToLockerItem(id: string, data: unknown): LockerItem | null {
 }
 
 export default function ItemsScreen() {
-  const router = useRouter();
-
   const [items, setItems] = useState<LockerItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
@@ -108,6 +116,8 @@ export default function ItemsScreen() {
   const [editQty, setEditQty] = useState('1');
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+
+  const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null);
 
   useEffect(() => {
     let db;
@@ -178,10 +188,11 @@ export default function ItemsScreen() {
         updatedAt: now,
       });
       setAddOpen(false);
+      showToast('Item added successfully.');
     } catch (e) {
-      setSaveError(
-        e instanceof Error ? e.message : 'Could not save item. Try again.',
-      );
+      const msg = e instanceof Error ? e.message : 'Could not save item. Try again.';
+      setSaveError(msg);
+      showToast(msg);
     } finally {
       setSaving(false);
     }
@@ -217,25 +228,55 @@ export default function ItemsScreen() {
         updatedAt: Date.now(),
       });
       closeEdit();
+      showToast('Item updated successfully.');
     } catch (e) {
-      setEditError(
-        e instanceof Error ? e.message : 'Could not update item. Try again.',
-      );
+      const msg = e instanceof Error ? e.message : 'Could not update item. Try again.';
+      setEditError(msg);
+      showToast(msg);
     } finally {
       setEditSaving(false);
     }
   }, [closeEdit, editId, editName, editQty]);
+
+  const deleteItem = useCallback(
+    (item: LockerItem) => {
+      if (deleteBusyId) return;
+      Alert.alert(
+        'Delete this item?',
+        `You are about to permanently delete “${item.title}”. This action can’t be undone.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Delete',
+            style: 'destructive',
+            onPress: async () => {
+              setDeleteBusyId(item.id);
+              try {
+                const db = getFirebaseRTDB();
+                await remove(ref(db, `${RTDB_ITEMS_PATH}/${item.id}`));
+                showToast('Item deleted.');
+              } catch (e) {
+                const msg = e instanceof Error ? e.message : 'Could not delete item. Try again.';
+                showToast(msg);
+              } finally {
+                setDeleteBusyId(null);
+              }
+            },
+          },
+        ],
+      );
+    },
+    [deleteBusyId],
+  );
 
   return (
     <View style={styles.root}>
       <StatusBar style="dark" />
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <View style={styles.header}>
-          <Pressable onPress={() => router.back()} style={styles.backBtn} hitSlop={10}>
-            <MaterialCommunityIcons name="chevron-left" size={28} color="#0F172A" />
-          </Pressable>
+          <View style={styles.headerSideSpacer} />
           <Text style={styles.headerTitle}>Items</Text>
-          <View style={styles.headerRightSpacer} />
+          <View style={styles.headerSideSpacer} />
         </View>
 
         {loading ? (
@@ -269,14 +310,34 @@ export default function ItemsScreen() {
                     <Text style={styles.cardTitle} numberOfLines={2}>
                       {item.title}
                     </Text>
-                    <Pressable
-                      onPress={() => openEdit(item)}
-                      style={({ pressed }) => [styles.iconBtn, pressed && styles.fabPressed]}
-                      hitSlop={8}
-                      accessibilityRole="button"
-                      accessibilityLabel="Update item">
-                      <MaterialCommunityIcons name="pencil-outline" size={22} color="#0F766E" />
-                    </Pressable>
+                    <View style={styles.rowActions}>
+                      <Pressable
+                        onPress={() => openEdit(item)}
+                        disabled={deleteBusyId === item.id}
+                        style={({ pressed }) => [styles.iconBtn, pressed && styles.fabPressed]}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel="Update item">
+                        <MaterialCommunityIcons name="pencil-outline" size={22} color="#0F766E" />
+                      </Pressable>
+                      <Pressable
+                        onPress={() => deleteItem(item)}
+                        disabled={deleteBusyId === item.id}
+                        style={({ pressed }) => [
+                          styles.iconBtnDanger,
+                          pressed && styles.fabPressed,
+                          deleteBusyId === item.id && styles.iconBtnDisabled,
+                        ]}
+                        hitSlop={8}
+                        accessibilityRole="button"
+                        accessibilityLabel="Delete item">
+                        <MaterialCommunityIcons
+                          name="trash-can-outline"
+                          size={22}
+                          color="#B91C1C"
+                        />
+                      </Pressable>
+                    </View>
                   </View>
                   <Text style={styles.cardDesc}>{item.description}</Text>
                   <View style={styles.metaRow}>
@@ -416,28 +477,13 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.two,
     paddingBottom: Spacing.three,
   },
-  backBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
-  },
+  headerSideSpacer: { width: 44 },
   headerTitle: {
     flex: 1,
     textAlign: 'center',
     fontSize: 18,
     fontWeight: '800',
     color: '#0F172A',
-  },
-  headerRightSpacer: {
-    width: 44,
   },
   centered: {
     flex: 1,
@@ -503,6 +549,11 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: 8,
   },
+  rowActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   cardTitle: {
     flex: 1,
     fontSize: 15,
@@ -513,6 +564,14 @@ const styles = StyleSheet.create({
     padding: 4,
     borderRadius: 8,
     backgroundColor: '#ECFDF5',
+  },
+  iconBtnDanger: {
+    padding: 4,
+    borderRadius: 8,
+    backgroundColor: '#FEF2F2',
+  },
+  iconBtnDisabled: {
+    opacity: 0.6,
   },
   cardDesc: {
     marginTop: 4,

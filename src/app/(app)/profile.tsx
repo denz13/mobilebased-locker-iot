@@ -301,11 +301,9 @@ export default function ProfileScreen() {
       <StatusBar style="dark" />
       <SafeAreaView style={styles.safe} edges={['top', 'bottom']}>
         <View style={styles.header}>
-          <Pressable onPress={() => router.back()} style={styles.backBtn} hitSlop={10}>
-            <MaterialCommunityIcons name="chevron-left" size={28} color="#0F172A" />
-          </Pressable>
+          <View style={styles.headerSideSpacer} />
           <Text style={styles.headerTitle}>Profile</Text>
-          <View style={styles.headerRightSpacer} />
+          <View style={styles.headerSideSpacer} />
         </View>
 
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
@@ -565,19 +563,7 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.two,
     paddingBottom: Spacing.three,
   },
-  backBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.06,
-    shadowRadius: 4,
-    elevation: 2,
-  },
+  headerSideSpacer: { width: 44 },
   headerTitle: {
     flex: 1,
     textAlign: 'center',
@@ -585,7 +571,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#0F172A',
   },
-  headerRightSpacer: { width: 44 },
   content: {
     paddingBottom: Spacing.six,
   },

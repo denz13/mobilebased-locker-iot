@@ -309,6 +309,16 @@ export default function LoginScreen() {
               style={({ pressed }) => [styles.signInBtn, pressed && styles.pressed]}>
               <Text style={styles.signInLabel}>{loading ? 'Signing in...' : 'Sign in'}</Text>
             </Pressable>
+
+            <View style={styles.signUpRow}>
+              <Text style={styles.signUpText}>Don&apos;t have an account?</Text>
+              <Pressable
+                onPress={() => router.push('/register')}
+                hitSlop={10}
+                style={({ pressed }) => [pressed && styles.pressed]}>
+                <Text style={styles.signUpLink}>Sign up here</Text>
+              </Pressable>
+            </View>
           </SafeAreaView>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -452,6 +462,23 @@ const styles = StyleSheet.create({
     fontSize: 17,
     fontWeight: '700',
     color: '#FFFFFF',
+  },
+  signUpRow: {
+    marginTop: Spacing.four,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 6,
+  },
+  signUpText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#64748B',
+  },
+  signUpLink: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: LoginAccent.main,
   },
   pressed: {
     opacity: 0.9,

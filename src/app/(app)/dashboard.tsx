@@ -16,7 +16,16 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated, { useSharedValue, withSequence, withSpring } from 'react-native-reanimated';
+import Animated, {
+  cancelAnimation,
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { Spacing } from '@/constants/theme';
 import { getFirebaseAuth, getFirebaseRTDB } from '@/lib/firebase';
@@ -407,13 +416,102 @@ export default function DashboardScreen() {
   const [loggingOut, setLoggingOut] = useState(false);
   const [itemAnalytics, setItemAnalytics] = useState<ItemAnalytics | null>(null);
   const [itemsAnalyticsError, setItemsAnalyticsError] = useState(false);
-  const tabBarPad = Math.max(insets.bottom, 10);
-  const tabBarH = 60 + tabBarPad;
+  const [hasUnreadNotifications, setHasUnreadNotifications] = useState(false);
+  /** Space for floating logout button above bottom edge (tab bar is outside this screen). */
+  const fabClearance = 72;
   const bellScale = useSharedValue(1);
+  const bellTranslateY = useSharedValue(0);
+  /** Extra rotation when tapped (idle swing uses `bellIdleRotate`). */
+  const bellRotateDeg = useSharedValue(0);
+  /** Continuous gentle swing like a hanging bell (no tap needed). */
+  const bellIdleRotate = useSharedValue(0);
+  const bellIdleSwayY = useSharedValue(0);
+
+  const bellIconAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateY: bellTranslateY.value + bellIdleSwayY.value },
+      {
+        rotate: `${bellIdleRotate.value + bellRotateDeg.value}deg`,
+      },
+      { scale: bellScale.value },
+    ],
+  }));
+
+  const playBellMotion = useCallback(() => {
+    bellScale.value = withSequence(
+      withSpring(1.22, { damping: 9, stiffness: 520 }),
+      withSpring(1, { damping: 12, stiffness: 380 }),
+    );
+    bellTranslateY.value = withSequence(
+      withSpring(-5, { damping: 10, stiffness: 400 }),
+      withSpring(0, { damping: 14, stiffness: 380 }),
+    );
+    bellRotateDeg.value = withSequence(
+      withTiming(-14, { duration: 55 }),
+      withSpring(0, { damping: 10, stiffness: 320 }),
+    );
+  }, []);
+
+  useEffect(() => {
+    bellIdleRotate.value = withRepeat(
+      withTiming(11, {
+        duration: 2200,
+        easing: Easing.inOut(Easing.sin),
+      }),
+      -1,
+      true,
+    );
+    bellIdleSwayY.value = withRepeat(
+      withTiming(2.5, {
+        duration: 1900,
+        easing: Easing.inOut(Easing.sin),
+      }),
+      -1,
+      true,
+    );
+    return () => {
+      cancelAnimation(bellIdleRotate);
+      cancelAnimation(bellIdleSwayY);
+    };
+  }, []);
 
   useEffect(() => {
     return onAuthStateChanged(getFirebaseAuth(), setUser);
   }, []);
+
+  useEffect(() => {
+    if (!user) {
+      setHasUnreadNotifications(false);
+      return;
+    }
+    let db;
+    try {
+      db = getFirebaseRTDB();
+    } catch {
+      setHasUnreadNotifications(false);
+      return;
+    }
+
+    const nRef = rtdbRef(db, `userNotifications/${user.uid}`);
+    const unsub = onValue(
+      nRef,
+      (snap) => {
+        const val = snap.val() as Record<string, unknown> | null;
+        if (!val) {
+          setHasUnreadNotifications(false);
+          return;
+        }
+        const anyUnread = Object.values(val).some((row) => {
+          if (!row || typeof row !== 'object') return false;
+          return (row as { read?: unknown }).read !== true;
+        });
+        setHasUnreadNotifications(anyUnread);
+      },
+      () => setHasUnreadNotifications(false),
+    );
+
+    return () => unsub();
+  }, [user]);
 
   useEffect(() => {
     let db;
@@ -476,7 +574,7 @@ export default function DashboardScreen() {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={[
             styles.scrollContent,
-            { paddingBottom: tabBarH + Spacing.five },
+            { paddingBottom: fabClearance + Spacing.five },
           ]}>
           <View style={styles.header}>
             <AvatarBubble label={avatarLetter} />
@@ -489,13 +587,13 @@ export default function DashboardScreen() {
               style={styles.bellBtn}
               hitSlop={8}
               onPress={() => {
-                bellScale.value = withSequence(withSpring(1.15, { damping: 10 }), withSpring(1));
+                playBellMotion();
                 router.push('/notification');
               }}>
-              <Animated.View style={{ transform: [{ scale: bellScale }] }}>
+              <Animated.View style={[bellIconAnimatedStyle, styles.bellInner]}>
                 <MaterialCommunityIcons name="bell-outline" size={24} color="#1E293B" />
+                {hasUnreadNotifications ? <View style={styles.bellDot} /> : null}
               </Animated.View>
-              <View style={styles.bellDot} />
             </Pressable>
           </View>
 
@@ -578,49 +676,10 @@ export default function DashboardScreen() {
         </ScrollView>
       </SafeAreaView>
 
-      <View style={[styles.tabBar, { paddingBottom: tabBarPad }]}>
-        <BottomTab
-          label="Home"
-          icon="home"
-          active
-          onPress={() => router.replace('/dashboard')}
-          activeColor={Teal.main}
-          inactiveColor={Teal.navInactive}
-        />
-        <BottomTab
-          label="Photos"
-          icon="image-multiple-outline"
-          onPress={() => router.push('/photos')}
-          activeColor={Teal.main}
-          inactiveColor={Teal.navInactive}
-        />
-        <BottomTab
-          label="Items"
-          icon="format-list-bulleted"
-          onPress={() => router.push('/items')}
-          activeColor={Teal.main}
-          inactiveColor={Teal.navInactive}
-        />
-        <BottomTab
-          label="History"
-          icon="clock-outline"
-          onPress={() => router.push('/history')}
-          activeColor={Teal.main}
-          inactiveColor={Teal.navInactive}
-        />
-        <BottomTab
-          label="Profile"
-          icon="account-circle-outline"
-          onPress={() => router.push('/profile')}
-          activeColor={Teal.main}
-          inactiveColor={Teal.navInactive}
-        />
-      </View>
-
       <Pressable
         style={({ pressed }) => [
           styles.logoutFab,
-          { bottom: tabBarH + 12 },
+          { bottom: Math.max(insets.bottom, 12) },
           pressed && styles.logoutFabPressed,
           loggingOut && styles.logoutFabDisabled,
         ]}
@@ -635,34 +694,6 @@ export default function DashboardScreen() {
         )}
       </Pressable>
     </View>
-  );
-}
-
-function BottomTab(props: {
-  label: string;
-  icon: keyof typeof MaterialCommunityIcons.glyphMap;
-  onPress: () => void;
-  activeColor: string;
-  inactiveColor: string;
-  active?: boolean;
-}) {
-  const s = useSharedValue(1);
-  const color = props.active ? props.activeColor : props.inactiveColor;
-
-  return (
-    <Pressable
-      style={styles.tabItem}
-      onPress={() => {
-        s.value = withSequence(withSpring(1.12, { damping: 10 }), withSpring(1));
-        props.onPress();
-      }}>
-      <Animated.View style={{ transform: [{ scale: s }] }}>
-        <MaterialCommunityIcons name={props.icon} size={26} color={color} />
-      </Animated.View>
-      <Text style={[styles.tabLabel, props.active && styles.tabLabelActive, { color }]}>
-        {props.label}
-      </Text>
-    </Pressable>
   );
 }
 
@@ -708,10 +739,17 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 2,
   },
+  bellInner: {
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    position: 'relative',
+  },
   bellDot: {
     position: 'absolute',
-    top: 10,
-    right: 10,
+    top: 8,
+    right: 8,
     width: 8,
     height: 8,
     borderRadius: 4,
@@ -1072,33 +1110,6 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     color: '#64748B',
     fontWeight: '500',
-  },
-  tabBar: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    flexDirection: 'row',
-    backgroundColor: '#FFFFFF',
-    paddingTop: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#E2E8F0',
-    justifyContent: 'space-around',
-    alignItems: 'center',
-  },
-  tabItem: {
-    alignItems: 'center',
-    minWidth: 72,
-  },
-  tabLabel: {
-    marginTop: 4,
-    fontSize: 11,
-    fontWeight: '500',
-    color: Teal.navInactive,
-  },
-  tabLabelActive: {
-    color: Teal.main,
-    fontWeight: '700',
   },
   logoutFab: {
     position: 'absolute',

@@ -2,7 +2,7 @@ import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { onAuthStateChanged, type User } from 'firebase/auth';
-import { onValue, ref } from 'firebase/database';
+import { onValue, ref, update } from 'firebase/database';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
@@ -135,6 +135,22 @@ export default function NotificationScreen() {
     return () => unsub();
   }, [authReady, user]);
 
+  const markAsRead = async (notif: Notif) => {
+    if (!user || !notif.unread) return;
+
+    // Optimistic UI so the red dot disappears immediately.
+    setNotifications((prev) =>
+      prev.map((n) => (n.id === notif.id ? { ...n, unread: false } : n)),
+    );
+
+    try {
+      const db = getFirebaseRTDB();
+      await update(ref(db, `userNotifications/${user.uid}/${notif.id}`), { read: true });
+    } catch {
+      // If RTDB write fails, we keep UI read to avoid a jarring flip-flop.
+    }
+  };
+
   const renderItem = ({ item }: { item: Notif }) => {
     const icon =
       item.type === 'denied'
@@ -162,7 +178,13 @@ export default function NotificationScreen() {
             : '#334155';
 
     return (
-      <View style={[styles.card, item.unread && styles.cardUnread]}>
+      <Pressable
+        onPress={() => void markAsRead(item)}
+        style={({ pressed }) => [
+          styles.card,
+          item.unread && styles.cardUnread,
+          pressed && styles.pressed,
+        ]}>
         <View style={[styles.iconWrap, { backgroundColor: iconBg }]}>
           <MaterialCommunityIcons name={icon} size={20} color={iconColor} />
         </View>
@@ -174,7 +196,7 @@ export default function NotificationScreen() {
           <Text style={styles.time}>{item.time}</Text>
           {item.unread ? <View style={styles.unreadDot} /> : null}
         </View>
-      </View>
+      </Pressable>
     );
   };
 
