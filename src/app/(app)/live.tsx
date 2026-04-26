@@ -1,19 +1,18 @@
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
-import { useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { WebView } from 'react-native-webview';
 
 import { Spacing } from '@/constants/theme';
 
-/** Set to true when stream/health check succeeds (placeholder: offline for now). */
-const ESP_CAM_CONNECTED = false;
+const ESP_CAM_STREAM_URL = 'http://10.0.254.50/';
 
 export default function LiveScreen() {
-  const router = useRouter();
-  const espOnline = ESP_CAM_CONNECTED;
-  const [recording, setRecording] = useState(false);
+  const [streamError, setStreamError] = useState(false);
+  const [streamRefreshSeed, setStreamRefreshSeed] = useState(0);
+  const espOnline = !streamError;
 
   return (
     <View style={styles.root}>
@@ -59,36 +58,42 @@ export default function LiveScreen() {
                     size={14}
                     color="#E2E8F0"
                   />
-                  <Text style={styles.overlayChipText}>
-                    {espOnline ? '720p' : 'Not connected'}
-                  </Text>
+                  <Text style={styles.overlayChipText}>{espOnline ? 'ESP stream' : 'Not connected'}</Text>
                 </View>
               </View>
 
-              <View style={styles.videoCenter}>
-                <View style={[styles.videoIconCircle, !espOnline && styles.videoIconCircleOffline]}>
-                  <MaterialCommunityIcons
-                    name={espOnline ? 'play-circle-outline' : 'wifi-off'}
-                    size={36}
-                    color={espOnline ? '#E2E8F0' : '#F87171'}
-                  />
+              <WebView
+                key={streamRefreshSeed}
+                source={{ uri: ESP_CAM_STREAM_URL }}
+                style={styles.streamImage}
+                onLoadStart={() => setStreamError(false)}
+                onError={() => setStreamError(true)}
+                javaScriptEnabled
+                domStorageEnabled
+                allowsInlineMediaPlayback
+                mixedContentMode="always"
+                originWhitelist={['*']}
+              />
+
+              {!espOnline ? (
+                <View style={styles.videoCenter}>
+                  <View style={[styles.videoIconCircle, styles.videoIconCircleOffline]}>
+                    <MaterialCommunityIcons name="wifi-off" size={36} color="#F87171" />
+                  </View>
+                  <Text style={styles.videoCenterTitle}>ESP32-CAM not connected</Text>
+                  <Text style={styles.videoCenterSub}>
+                    The camera is offline or unreachable. Check power, Wi-Fi, and make sure{' '}
+                    {ESP_CAM_STREAM_URL} is accessible from this phone.
+                  </Text>
                 </View>
-                <Text style={styles.videoCenterTitle}>
-                  {espOnline ? 'Camera preview' : 'ESP32-CAM not connected'}
-                </Text>
-                <Text style={styles.videoCenterSub}>
-                  {espOnline
-                    ? 'Live video from your ESP32-CAM will show in this area.'
-                    : 'The camera is offline or unreachable. Check power, Wi‑Fi, and that the stream URL is correct.'}
-                </Text>
-              </View>
+              ) : null}
             </View>
 
             {!espOnline ? (
               <View style={styles.offlineBanner}>
                 <MaterialCommunityIcons name="alert-circle-outline" size={18} color="#B45309" />
                 <Text style={styles.offlineBannerText}>
-                  Connect the ESP32-CAM to your network to enable live view and recording.
+                  Cannot reach {ESP_CAM_STREAM_URL}. Keep your phone and ESP32-CAM on the same network.
                 </Text>
               </View>
             ) : null}
@@ -96,38 +101,12 @@ export default function LiveScreen() {
             <View style={styles.cameraActions}>
               <Pressable
                 onPress={() => {
-                  if (!espOnline) return;
-                  setRecording((v) => !v);
+                  setStreamError(false);
+                  setStreamRefreshSeed((v) => v + 1);
                 }}
-                disabled={!espOnline}
-                style={({ pressed }) => [
-                  styles.recordBtn,
-                  recording && espOnline && styles.recordBtnActive,
-                  !espOnline && styles.recordBtnDisabled,
-                  pressed && espOnline && styles.pressed,
-                ]}>
-                <MaterialCommunityIcons
-                  name={recording && espOnline ? 'stop-circle' : 'record-circle'}
-                  size={22}
-                  color="#FFFFFF"
-                />
-                <Text style={styles.recordBtnText}>
-                  {!espOnline ? 'Start record (offline)' : recording ? 'Stop recording' : 'Start record'}
-                </Text>
-              </Pressable>
-
-              <Pressable
-                onPress={() => {}}
                 style={({ pressed }) => [styles.secondaryBtn, pressed && styles.pressed]}>
                 <MaterialCommunityIcons name="refresh" size={18} color="#0F766E" />
                 <Text style={styles.secondaryBtnText}>Refresh</Text>
-              </Pressable>
-
-              <Pressable
-                onPress={() => {}}
-                style={({ pressed }) => [styles.secondaryBtn, pressed && styles.pressed]}>
-                <MaterialCommunityIcons name="fullscreen" size={18} color="#0F766E" />
-                <Text style={styles.secondaryBtnText}>Fullscreen</Text>
               </Pressable>
             </View>
           </View>
@@ -135,19 +114,12 @@ export default function LiveScreen() {
           <View style={styles.infoCard}>
             <View style={styles.infoRow}>
               <MaterialCommunityIcons name="information-outline" size={22} color="#0F766E" />
-              <Text style={styles.infoTitle}>Recording</Text>
+              <Text style={styles.infoTitle}>Live monitor</Text>
             </View>
             <Text style={styles.infoBody}>
-              Clips are listed under Record. You can open saved videos from there after each capture
-              finishes.
+              This page shows your current ESP32-CAM feed in real time. Use Refresh if the network
+              gets slow or the frame stalls.
             </Text>
-            <Pressable
-              onPress={() => router.push({ pathname: '/record' })}
-              style={({ pressed }) => [styles.linkRow, pressed && styles.pressed]}
-              hitSlop={4}>
-              <Text style={styles.linkText}>Open recordings</Text>
-              <MaterialCommunityIcons name="chevron-right" size={20} color="#0F766E" />
-            </Pressable>
           </View>
 
           <View style={styles.tipsCard}>
@@ -183,11 +155,11 @@ const styles = StyleSheet.create({
   headerSideSpacer: { width: 44 },
   headerTitle: { flex: 1, textAlign: 'center', fontSize: 18, fontWeight: '800', color: '#0F172A' },
   cameraCard: {
-    marginHorizontal: Spacing.four,
+    marginHorizontal: Spacing.two,
     marginBottom: Spacing.four,
     backgroundColor: '#FFFFFF',
-    borderRadius: 18,
-    padding: Spacing.four,
+    borderRadius: 22,
+    padding: Spacing.three,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.06,
@@ -219,12 +191,16 @@ const styles = StyleSheet.create({
   pillText: { fontSize: 12, fontWeight: '900', color: '#0F172A' },
   videoFrame: {
     width: '100%',
-    aspectRatio: 16 / 9,
-    borderRadius: 16,
+    minHeight: 360,
+    aspectRatio: 1,
+    borderRadius: 18,
     overflow: 'hidden',
     backgroundColor: '#0B1220',
     borderWidth: 1,
     borderColor: 'rgba(148,163,184,0.35)',
+  },
+  streamImage: {
+    ...StyleSheet.absoluteFillObject,
   },
   videoFrameOffline: {
     backgroundColor: '#0F172A',
@@ -300,31 +276,10 @@ const styles = StyleSheet.create({
     marginTop: Spacing.three,
     flexDirection: 'row',
     alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 10,
+    gap: 8,
+    justifyContent: 'flex-end',
   },
-  recordBtn: {
-    flexGrow: 1,
-    flexBasis: '100%',
-    minWidth: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    paddingVertical: 14,
-    borderRadius: 999,
-    backgroundColor: '#B91C1C',
-  },
-  recordBtnActive: {
-    backgroundColor: '#991B1B',
-  },
-  recordBtnDisabled: {
-    backgroundColor: '#94A3B8',
-    opacity: 0.85,
-  },
-  recordBtnText: { fontSize: 15, fontWeight: '900', color: '#FFFFFF' },
   secondaryBtn: {
-    flex: 1,
     minWidth: 120,
     flexDirection: 'row',
     alignItems: 'center',
@@ -340,7 +295,7 @@ const styles = StyleSheet.create({
   secondaryBtnText: { fontSize: 13, fontWeight: '900', color: '#0F766E' },
   pressed: { opacity: 0.9 },
   infoCard: {
-    marginHorizontal: Spacing.four,
+    marginHorizontal: Spacing.two,
     marginBottom: Spacing.four,
     backgroundColor: '#FFFFFF',
     borderRadius: 18,
@@ -358,17 +313,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#64748B',
     lineHeight: 21,
-    marginBottom: Spacing.three,
   },
-  linkRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: Spacing.two,
-  },
-  linkText: { fontSize: 15, fontWeight: '800', color: '#0F766E' },
   tipsCard: {
-    marginHorizontal: Spacing.four,
+    marginHorizontal: Spacing.two,
     backgroundColor: '#F8FAFC',
     borderRadius: 16,
     padding: Spacing.four,

@@ -19,13 +19,12 @@ const Teal = {
 } as const;
 
 const TABS: {
-  path: '/dashboard' | '/live' | '/record' | '/photos' | '/items' | '/history' | '/profile';
+  path: '/dashboard' | '/live' | '/photos' | '/items' | '/history' | '/profile';
   label: string;
   icon: keyof typeof MaterialCommunityIcons.glyphMap;
 }[] = [
   { path: '/dashboard', label: 'Home', icon: 'home' },
   { path: '/live', label: 'Live', icon: 'access-point' },
-  { path: '/record', label: 'Record', icon: 'clipboard-text-outline' },
   { path: '/photos', label: 'Photos', icon: 'image-multiple-outline' },
   { path: '/items', label: 'Items', icon: 'format-list-bulleted' },
   { path: '/history', label: 'History', icon: 'clock-outline' },

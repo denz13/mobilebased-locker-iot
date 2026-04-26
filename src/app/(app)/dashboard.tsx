@@ -27,6 +27,7 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
+import { buildEspSnapshotUri, ESP_SNAPSHOT_SLOTS } from '@/constants/esp-cam';
 import { Spacing } from '@/constants/theme';
 import { getFirebaseAuth, getFirebaseRTDB } from '@/lib/firebase';
 
@@ -197,11 +198,11 @@ const ACTIVITY = [
   },
 ];
 
-const PICTURES = [
-  { id: '1', label: 'Locker', source: require('@/assets/images/logo.png') },
-  { id: '2', label: 'Smart', source: require('@/assets/images/logo.png') },
-  { id: '3', label: 'IoT', source: require('@/assets/images/logo.png') },
-] as const;
+const PICTURES = ESP_SNAPSHOT_SLOTS.map((slot) => ({
+  id: slot.id,
+  label: slot.title,
+  path: slot.path,
+}));
 
 function greetNameFromUser(u: User | null): string {
   if (!u) return 'User';
@@ -413,6 +414,7 @@ export default function DashboardScreen() {
   const [user, setUser] = useState<User | null>(null);
   const [pictureIndex, setPictureIndex] = useState(0);
   const [picturesW, setPicturesW] = useState(0);
+  const [picturesSeed] = useState(() => Date.now());
   const [loggingOut, setLoggingOut] = useState(false);
   const [itemAnalytics, setItemAnalytics] = useState<ItemAnalytics | null>(null);
   const [itemsAnalyticsError, setItemsAnalyticsError] = useState(false);
@@ -628,7 +630,7 @@ export default function DashboardScreen() {
                   style={[styles.picturePage, picturesW ? { width: picturesW } : null]}>
                   <View style={styles.pictureTile}>
                     <Image
-                      source={p.source}
+                      source={{ uri: buildEspSnapshotUri(p.path, picturesSeed) }}
                       style={styles.pictureImage}
                       contentFit="cover"
                       accessibilityLabel={p.label}
