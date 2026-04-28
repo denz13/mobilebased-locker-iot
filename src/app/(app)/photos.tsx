@@ -79,7 +79,8 @@ export default function PhotosScreen() {
                       />
                       <Text style={styles.errorTitle}>No image</Text>
                       <Text style={styles.errorBody}>
-                        Unable to load image due to slow network. Please try refresh.
+                        Unable to load image due to slow network. Please try
+                        refresh.
                       </Text>
                     </View>
                   ) : null}
