@@ -27,7 +27,6 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 
-import { buildEspSnapshotUri, ESP_SNAPSHOT_SLOTS } from '@/constants/esp-cam';
 import { Spacing } from '@/constants/theme';
 import { getFirebaseAuth, getFirebaseRTDB } from '@/lib/firebase';
 
@@ -42,6 +41,7 @@ const Teal = {
 } as const;
 
 const RTDB_ITEMS_PATH = 'items';
+const DASHBOARD_CAPTURE_ENDPOINT = 'http://192.168.8.50/capture';
 
 type ItemAnalytics = {
   totalLines: number;
@@ -198,11 +198,13 @@ const ACTIVITY = [
   },
 ];
 
-const PICTURES = ESP_SNAPSHOT_SLOTS.map((slot) => ({
-  id: slot.id,
-  label: slot.title,
-  path: slot.path,
-}));
+const PICTURES = [
+  {
+    id: 'capture',
+    label: 'Captured from ESP-CAM',
+    path: DASHBOARD_CAPTURE_ENDPOINT,
+  },
+];
 
 function greetNameFromUser(u: User | null): string {
   if (!u) return 'User';
@@ -630,7 +632,7 @@ export default function DashboardScreen() {
                   style={[styles.picturePage, picturesW ? { width: picturesW } : null]}>
                   <View style={styles.pictureTile}>
                     <Image
-                      source={{ uri: buildEspSnapshotUri(p.path, picturesSeed) }}
+                      source={{ uri: `${p.path}?v=${picturesSeed}` }}
                       style={styles.pictureImage}
                       contentFit="cover"
                       accessibilityLabel={p.label}

@@ -5,19 +5,20 @@ import React, { useCallback, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { buildEspSnapshotUri, ESP_SNAPSHOT_SLOTS } from "@/constants/esp-cam";
 import { Spacing } from "@/constants/theme";
+
+const CAPTURE_ENDPOINT = "http://192.168.8.50/capture";
 
 export default function PhotosScreen() {
   const [refreshSeed, setRefreshSeed] = useState(0);
-  const [failedIds, setFailedIds] = useState<Record<string, boolean>>({});
+  const [failedImage, setFailedImage] = useState(false);
 
   const bumpRefresh = useCallback(() => {
-    setFailedIds({});
+    setFailedImage(false);
     setRefreshSeed((n) => n + 1);
   }, []);
 
-  const uriFor = (path: string) => buildEspSnapshotUri(path, refreshSeed);
+  const captureUri = `${CAPTURE_ENDPOINT}?v=${refreshSeed}`;
 
   return (
     <View style={styles.root}>
@@ -47,47 +48,32 @@ export default function PhotosScreen() {
             <Text style={styles.hintMono}>photos.tsx</Text> to match your ESP routes.
           </Text> */}
 
-          {ESP_SNAPSHOT_SLOTS.map((slot) => {
-            const failed = failedIds[slot.id];
-            return (
-              <View key={slot.id} style={styles.card}>
-                <Text style={styles.cardTitle}>{slot.title}</Text>
-                <View style={styles.imageWrap}>
-                  <Image
-                    source={{ uri: uriFor(slot.path) }}
-                    style={styles.cardImage}
-                    contentFit="cover"
-                    cachePolicy="none"
-                    onError={() =>
-                      setFailedIds((prev) => ({ ...prev, [slot.id]: true }))
-                    }
-                    onLoad={() =>
-                      setFailedIds((prev) => {
-                        if (!prev[slot.id]) return prev;
-                        const next = { ...prev };
-                        delete next[slot.id];
-                        return next;
-                      })
-                    }
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>Captured from ESP-CAM</Text>
+            <View style={styles.imageWrap}>
+              <Image
+                source={{ uri: captureUri }}
+                style={styles.cardImage}
+                contentFit="cover"
+                cachePolicy="none"
+                onError={() => setFailedImage(true)}
+                onLoad={() => setFailedImage(false)}
+              />
+              {failedImage ? (
+                <View style={styles.errorOverlay}>
+                  <MaterialCommunityIcons
+                    name="image-off-outline"
+                    size={32}
+                    color="#94A3B8"
                   />
-                  {failed ? (
-                    <View style={styles.errorOverlay}>
-                      <MaterialCommunityIcons
-                        name="image-off-outline"
-                        size={32}
-                        color="#94A3B8"
-                      />
-                      <Text style={styles.errorTitle}>No image</Text>
-                      <Text style={styles.errorBody}>
-                        Unable to load image due to slow network. Please try
-                        refresh.
-                      </Text>
-                    </View>
-                  ) : null}
+                  <Text style={styles.errorTitle}>No image</Text>
+                  <Text style={styles.errorBody}>
+                    Unable to load image due to slow network. Please try refresh.
+                  </Text>
                 </View>
-              </View>
-            );
-          })}
+              ) : null}
+            </View>
+          </View>
 
           <Pressable
             onPress={bumpRefresh}
@@ -97,7 +83,7 @@ export default function PhotosScreen() {
             ]}
           >
             <MaterialCommunityIcons name="refresh" size={18} color="#0F766E" />
-            <Text style={styles.footerBtnText}>Reload all photos</Text>
+            <Text style={styles.footerBtnText}>Reload capture</Text>
           </Pressable>
         </ScrollView>
       </SafeAreaView>
